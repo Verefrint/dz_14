@@ -1,0 +1,75 @@
+// SPDX-License-Identifier: MIT
+pragma solidity "0.8.26";
+
+contract StakingTarget {
+    address public proxy;
+    Return public result; 
+
+
+    struct Return {
+        address user;
+        uint224 amount;
+        uint32 time;
+        address token;
+    }
+
+    function setProxy(address _newProxy) public {
+        proxy = _newProxy;
+    }
+
+    // 457540c3f08f7f759206b5ea9a4cba321de60dc0
+    // 0000000000000000000000000000000000000000000000000000014
+    // 0000007b
+    // 32316fe3ddf621fdaa71437df19b94f9830c1118
+
+    function getBytes(address user, uint224 amount, uint32 timestamp, address token) public pure returns (bytes memory) {
+        return abi.encodePacked(user, amount, timestamp, token);
+    }
+
+
+    function stake(bytes calldata data) external payable {
+        (bool success, bytes memory res) = proxy.delegatecall(abi.encodeWithSignature("executeStake(bytes)", data));
+        require(success, "failed");
+
+        result = abi.decode(res, (Return));
+    }
+}
+
+contract StakeImplementation {
+
+    struct Return {
+        address user;
+        uint224 amount;
+        uint32 time;
+        address token;
+    }
+
+    function executeStake(bytes calldata data) public pure returns(Return memory) {
+        address user;
+        uint224 amount;
+        uint32 time;
+        address token;
+   
+      assembly {
+        if lt(calldatasize(), add(data.offset, 72)) {
+            revert(0, 0)
+        }
+
+        //0xd457540c3f08f7f759206b5ea9a4cba321de60dc0 000000000000000000000000 last 12 bytes not used 12 = 96 bit so shr 0x000000000000000000000000d457540c3f08f7f759206b5ea9a4cba321de60dc0
+        user := shr(96, calldataload(data.offset)) //20bytes
+
+        // load next slot and remove last 4 bytes
+        amount := shr(32, calldataload(add(data.offset, 20)))//28 bytes 
+
+        // 0x0000007b32316fe3ddf621fdaa71437df19b94f9830c1118
+        // 0x000000000000000000000000000000000000000000000000000000000000007b
+        time := shr(224, calldataload(add(data.offset, 48)))//4bytes
+
+        // Load token (last 20 bytes)
+        token := shr(96, calldataload(add(data.offset, 52)))//20 bytes
+}
+
+
+        return Return(user, amount, time, token); 
+    } //0xd457540c3f08f7F759206B5eA9a4cBa321dE60DC 20 123 0x32316fE3DDf621fdAa71437Df19b94F9830c1118
+}
