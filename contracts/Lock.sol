@@ -13,6 +13,7 @@ contract StakingTarget  is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     struct Stake {
         address user;
         uint224 amount;
+        uint startTime;
         uint32 time;
         address token;
     }
@@ -32,8 +33,8 @@ contract StakingTarget  is Initializable, OwnableUpgradeable, UUPSUpgradeable {
 
     function _authorizeUpgrade(address newImplementation) internal onlyOwner override {}
 
-    function getBytesForWithdraw(uint id, uint224 amountToWithdraw) public pure returns (bytes memory) {
-        return abi.encodePacked(id, amountToWithdraw);
+    function getBytesForWithdraw(uint id, uint224 amountToWithdraw, uint32 newStartTime) public pure returns (bytes memory) {
+        return abi.encodePacked(id, amountToWithdraw, newStartTime);
     }
 
     function getBytesForStaking(address user, uint224 amount, uint32 timestamp, address token) public pure returns (bytes memory) {
@@ -70,12 +71,14 @@ error TooManywOrNothingForWithdraw();
 error TimeInFuture();
 error NotValidInput();
 error NotEnoughTokensInContractBalance();
-error CannotStartStakingInPast(uint current, uint32 send);
+error CannotStartStakLessThenOneDay();
+error NotEnoughTimeStaked();
 
 contract StakeImplementation {
     struct Stake {
         address user;
         uint224 amount;
+        uint startTime;
         uint32 time;
         address token;
     }
@@ -109,14 +112,14 @@ contract StakeImplementation {
         }
 
         //100
-        require(time >= block.timestamp - 100, CannotStartStakingInPast(block.timestamp, time));
+        require(time > 86400, CannotStartStakLessThenOneDay());
 
         stakingId++;
 
         IERC20 token = IERC20(_tokenAddress);
 
         token.safeTransferFrom(user, address(this), amount);
-        staking[stakingId] = Stake(user, amount, time, _tokenAddress);
+        staking[stakingId] = Stake(user, amount, block.timestamp, time, _tokenAddress);
 
         emit StakingEvent(stakingId);
 
@@ -126,15 +129,19 @@ contract StakeImplementation {
     function executeWithdraw(bytes calldata data) public returns(bytes memory) {
         uint id;
         uint224 amountToWithdraw;
+        uint32 newTime;
    
         assembly {
             id := calldataload(data.offset)
 
             amountToWithdraw := shr(32, calldataload(add(data.offset, 32)))
+
+            newTime := shr(224, calldataload(add(data.offset, 60)))
         }
 
         Stake storage current = staking[id];
 
+        require(current.time + current.startTime >= block.timestamp, NotEnoughTimeStaked());
         require(current.user == msg.sender, NotOwner());
         require(current.amount > 0 && current.amount >= amountToWithdraw, TooManywOrNothingForWithdraw());
 
@@ -149,7 +156,8 @@ contract StakeImplementation {
         token.safeTransfer(current.user, result);
 
         if (current.amount != amountToWithdraw) {
-            current.time = uint32(block.timestamp);
+            current.time = newTime;
+            current.startTime = block.timestamp;
         }
 
         emit StakingEvent(id);
@@ -157,12 +165,8 @@ contract StakeImplementation {
         return abi.encodePacked(id);
     }
 
-    function countReward(uint32 timestamp, uint224 amountOfTokens, uint percentsPerYear) public view returns (uint reward) {
-        require(timestamp <= block.timestamp, TimeInFuture());
-
-        uint timeElapsed = block.timestamp - timestamp;
-
-        reward = (amountOfTokens * percentsPerYear * timeElapsed * 1_000_000) / (100_000_000 * 31536000);
+    function countReward(uint32 timestamp, uint224 amountOfTokens, uint percentsPerYear) public pure returns (uint reward) {
+        reward = (amountOfTokens * percentsPerYear * timestamp * 1_000_000) / (100_000_000 * 31536000);
 
         return reward;
     }
