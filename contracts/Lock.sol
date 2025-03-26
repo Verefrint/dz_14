@@ -56,7 +56,7 @@ contract StakingTarget  is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     }
 
     fallback(bytes calldata data) external returns (bytes memory) {
-        (bool ok, bytes memory res) = currentProxy.call(data);
+        (bool ok, bytes memory res) = currentProxy.delegatecall(data);
 
         if (!ok) {
             revert UnsuccesedCall();
@@ -84,8 +84,6 @@ contract StakeImplementation {
     mapping(uint => Stake) public staking;
 
     event StakingEvent(uint id);
-
-    uint8 public percent;
 
     using SafeERC20 for IERC20;
 
@@ -135,7 +133,7 @@ contract StakeImplementation {
             amountToWithdraw := shr(32, calldataload(add(data.offset, 32)))
         }
 
-        Stake memory current = staking[id];
+        Stake storage current = staking[id];
 
         require(current.user == msg.sender, NotOwner());
         require(current.amount > 0 && current.amount >= amountToWithdraw, TooManywOrNothingForWithdraw());
